@@ -32,6 +32,7 @@ from optuna.study._constrained_optimization import _get_feasible_trials
 from optuna.study._constrained_optimization import _is_constrained_optimization
 from optuna.study._multi_objective import _get_pareto_front_trials
 from optuna.study._optimize import _optimize
+from optuna.study._precheck import precheck_add_trials as _precheck_add_trials
 from optuna.study._study_direction import StudyDirection
 from optuna.study._study_summary import StudySummary  # NOQA
 from optuna.study._tell import _get_frozen_trial
@@ -45,6 +46,8 @@ _dataframe = _LazyImport("optuna.study._dataframe")
 if TYPE_CHECKING:
     from optuna._typing import JSONSerializable
     from optuna.study._dataframe import pd
+    from optuna.study._precheck import ExternalTrial
+    from optuna.study._precheck import StudyPrecheckReport
     from optuna.trial import FrozenTrial
     from optuna.trial import Trial
 
@@ -1015,6 +1018,69 @@ class Study:
 
         for trial in trials:
             self.add_trial(trial)
+
+    @experimental_func("5.1.0")
+    def precheck_add_trials(
+        self, trials: Iterable["FrozenTrial | ExternalTrial"]
+    ) -> "StudyPrecheckReport":
+        """Check whether external trials can be added to the study without adding them.
+
+        This method is read-only: nothing is written to the storage. Each record is classified
+        as importable, conflicting, or unconfirmable, together with the reasons. The reported
+        issues distinguish records that are invalid on their own from records that are merely
+        inconsistent with each other in the same batch.
+
+        The check covers the number of objectives, the optimization directions, the parameter
+        distributions and the trial states. Widened or narrowed numerical distribution bounds
+        are accepted as a dynamic parameter space; only the distribution kind, the ``log``
+        configuration and categorical choices must stay fixed.
+
+        A bare :class:`~optuna.trial.FrozenTrial` does not carry the direction of its source
+        study, so its direction consistency cannot be confirmed; wrap it in
+        :class:`~optuna.study.ExternalTrial` with the source directions to check it.
+
+        The returned report is bound to the target study observed at the time of the call. It
+        cannot be used to skip validation: :func:`~optuna.study.Study.add_trial` always runs its
+        own checks. If the study may have changed since the report, use
+        :meth:`~optuna.study.StudyPrecheckReport.is_premise_current` and run the precheck again.
+
+        Example:
+
+            .. testcode::
+
+                import optuna
+                from optuna.distributions import FloatDistribution
+                from optuna.study import ExternalTrial
+
+                study = optuna.create_study()
+                study.optimize(lambda trial: trial.suggest_float("x", 0, 10) ** 2, n_trials=3)
+
+                external_trial = optuna.trial.create_trial(
+                    params={"x": 2.0},
+                    distributions={"x": FloatDistribution(0, 10)},
+                    value=4.0,
+                )
+                report = study.precheck_add_trials(
+                    [
+                        ExternalTrial(
+                            external_trial,
+                            directions=[optuna.study.StudyDirection.MINIMIZE],
+                        )
+                    ]
+                )
+                assert report.all_importable
+                assert len(study.trials) == 3  # Nothing was added.
+
+        Args:
+            trials:
+                External trials to check, each given as a :class:`~optuna.trial.FrozenTrial`
+                or as an :class:`~optuna.study.ExternalTrial`.
+
+        Returns:
+            A :class:`~optuna.study.StudyPrecheckReport` with a verdict for each record.
+        """
+
+        return _precheck_add_trials(self, trials)
 
     @experimental_func("3.2.0")
     def set_metric_names(self, metric_names: list[str]) -> None:

@@ -19,3 +19,9 @@ The :mod:`~optuna.study` module implements the :class:`~optuna.study.Study` obje
    MaxTrialsCallback
    StudyDirection
    StudySummary
+   ExternalTrial
+   StudyPrecheckReport
+   TrialPrecheckResult
+   PrecheckIssue
+   PrecheckIssueCategory
+   TrialImportStatus
