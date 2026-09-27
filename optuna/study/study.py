@@ -30,6 +30,7 @@ from optuna.distributions import BaseDistribution
 from optuna.storages._heartbeat import is_heartbeat_enabled
 from optuna.study._constrained_optimization import _get_feasible_trials
 from optuna.study._constrained_optimization import _is_constrained_optimization
+from optuna.study._intermediate_alignment import _DEFAULT_STATES
 from optuna.study._multi_objective import _get_pareto_front_trials
 from optuna.study._optimize import _optimize
 from optuna.study._study_direction import StudyDirection
@@ -41,10 +42,12 @@ from optuna.trial import TrialState
 
 
 _dataframe = _LazyImport("optuna.study._dataframe")
+_intermediate_alignment = _LazyImport("optuna.study._intermediate_alignment")
 
 if TYPE_CHECKING:
     from optuna._typing import JSONSerializable
     from optuna.study._dataframe import pd
+    from optuna.study._intermediate_alignment import AlignedIntermediateValues
     from optuna.trial import FrozenTrial
     from optuna.trial import Trial
 
@@ -801,6 +804,82 @@ class Study:
             objective value as value.
         """
         return _dataframe._trials_dataframe(self, attrs, multi_index)
+
+    def align_intermediate_values(
+        self,
+        *,
+        target_steps: Sequence[int] | None = None,
+        budget_range: tuple[int | None, int | None] | None = None,
+        interpolation: str = "linear",
+        states: Container[TrialState] | None = _DEFAULT_STATES,
+        trial_numbers: Container[int] | None = None,
+        budget_semantics: Mapping[int, str] | None = None,
+    ) -> AlignedIntermediateValues:
+        """Align trials' intermediate values onto common resource budget points.
+
+        Trials that report at different strides are resampled onto the same target budget
+        points by interpolating between adjacent, actually reported points. Each aligned
+        point records whether it was reported or produced by an explicit interpolation rule.
+
+        The result is strictly read-only: no value is extrapolated beyond a trial's last
+        reported point, missing points are :obj:`None` rather than zero, failed and pruned
+        trials keep their reported values, and nothing is written back to the storage or used
+        for pruning.
+
+        Example:
+
+            .. testcode::
+
+                import optuna
+                from optuna.study import AlignedValueType
+                from optuna.trial import create_trial
+
+                study = optuna.create_study()
+                study.add_trial(
+                    create_trial(value=1.0, intermediate_values={0: 0.0, 1: 1.0, 2: 2.0})
+                )
+                study.add_trial(create_trial(value=2.0, intermediate_values={0: 0.0, 2: 4.0}))
+
+                aligned = study.align_intermediate_values(target_steps=[0, 1, 2])
+                second_trial = aligned.trials[1]
+                assert second_trial.points[1].kind == AlignedValueType.INTERPOLATED
+                assert second_trial.points[1].value == 2.0
+
+        Args:
+            target_steps:
+                Common resource budget points to align every trial onto. They must be
+                strictly increasing integers. Defaults to the sorted union of all reported
+                steps.
+            budget_range:
+                Optional inclusive ``(low, high)`` range restricting the target budget
+                points; either bound may be :obj:`None`.
+            interpolation:
+                Explicit interpolation rule used between adjacent reported points.
+                Currently only ``"linear"`` is supported.
+            states:
+                Trial states to include. Defaults to running, complete, pruned, and failed
+                trials. Set to :obj:`None` to include every state.
+            trial_numbers:
+                Optional subset of trial numbers to align. Use it to compare trial groups
+                separately.
+            budget_semantics:
+                Optional mapping from trial number to the resource budget semantics that the
+                trial's steps represent. A :class:`ValueError` is raised when the selected
+                trials resolve to more than one semantics.
+
+        Returns:
+            A read-only :class:`~optuna.study.AlignedIntermediateValues` object.
+        """
+
+        return _intermediate_alignment.align_intermediate_values(
+            self,
+            target_steps=target_steps,
+            budget_range=budget_range,
+            interpolation=interpolation,
+            states=states,
+            trial_numbers=trial_numbers,
+            budget_semantics=budget_semantics,
+        )
 
     def stop(self) -> None:
         """Exit from the current optimization loop after the running trials finish.

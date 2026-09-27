@@ -19,3 +19,8 @@ The :mod:`~optuna.study` module implements the :class:`~optuna.study.Study` obje
    MaxTrialsCallback
    StudyDirection
    StudySummary
+   align_intermediate_values
+   AlignedIntermediateValues
+   AlignedTrialIntermediateValues
+   AlignedIntermediateValue
+   AlignedValueType
